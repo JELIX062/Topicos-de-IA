@@ -1,0 +1,21 @@
+=== Autoencoder + clasificador ===
+              precision    recall  f1-score   support
+
+  Elliptical       0.27      0.75      0.40         4
+     Espiral       0.91      0.64      0.75        33
+  Lenticular       0.31      0.40      0.35        10
+
+    accuracy                           0.60        47
+   macro avg       0.50      0.60      0.50        47
+weighted avg       0.73      0.60      0.63        47
+
+=== CNN ===
+              precision    recall  f1-score   support
+
+  Elliptical       0.33      0.50      0.40         4
+     Espiral       0.91      0.88      0.89        33
+  Lenticular       0.56      0.50      0.53        10
+
+    accuracy                           0.77        47
+   macro avg       0.60      0.63      0.61        47
+weighted avg       0.78      0.77      0.77        47
