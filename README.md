@@ -41,7 +41,12 @@ python clasificador_galaxias.py --help                          # épocas, tama�
 | `7_cnn_diagrama_<clase>.png` | **Diagrama de la CNN con los mapas reales** de cada capa, flatten, capa densa y softmax |
 | `8_cnn_mapas_por_capa_<clase>.png` | Los 16 mapas más activos de cada capa (conv1 → pool3) |
 | `9_cnn_filtros_conv1_<clase>.png` | Cada kernel 3×3 aprendido y el mapa que produce |
+| `10_predicciones_prueba.png` | Todas las imágenes del 20% de prueba con la predicción de ambos modelos |
 | `reporte.txt` | Precisión, recall y F1 de ambos modelos |
+
+Las imágenes se dividen **80% entrenamiento / 20% prueba** (estratificado por clase). El 20% de prueba nunca se usa
+para ajustar los pesos, así que sirve para probar los modelos sin subir imágenes nuevas. En Colab, la celda 6.4
+permite elegir cualquier imagen de ese 20% con un formulario.
 
 > Nota: el conjunto es pequeño y desbalanceado (130 espirales, 38 lenticulares, 18 elípticas), así que se usan
 > rotaciones/espejos como aumento de datos y pesos por clase. Elípticas y lenticulares se parecen mucho,

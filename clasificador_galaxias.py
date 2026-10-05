@@ -38,6 +38,7 @@ import keras
 from keras import layers
 
 SEMILLA = 42
+PORC_PRUEBA = 0.20  # 80% entrenamiento / 20% prueba
 CARPETA_SALIDA = "resultados"
 
 
@@ -171,6 +172,30 @@ def graficar_matriz_confusion(y_real, y_pred, clases, titulo, nombre):
     fig.colorbar(im, ax=eje, fraction=0.046)
     guardar(fig, nombre)
 
+
+def graficar_predicciones_prueba(X, y, probs_ae, probs_cnn, clases, nombre, columnas=10):
+    """Todas las imágenes del 20% de prueba con la predicción de ambos modelos (verde = acierto)."""
+    n = len(X)
+    filas = int(np.ceil(n / columnas))
+    fig, ejes = plt.subplots(filas, columnas, figsize=(1.9 * columnas, 2.7 * filas), squeeze=False)
+    for k, eje in enumerate(ejes.flat):
+        eje.axis("off")
+        if k >= n:
+            continue
+        eje.imshow(X[k, ..., 0], cmap="gray")
+        p_ae, p_cnn = int(probs_ae[k].argmax()), int(probs_cnn[k].argmax())
+        eje.set_title(f"Real: {clases[y[k]]}", fontsize=8)
+        eje.text(0.5, -0.04, f"AE: {clases[p_ae]}", transform=eje.transAxes, ha="center", va="top", fontsize=7.5,
+                 color="green" if p_ae == y[k] else "red")
+        eje.text(0.5, -0.17, f"CNN: {clases[p_cnn]}", transform=eje.transAxes, ha="center", va="top",
+                 fontsize=7.5, color="green" if p_cnn == y[k] else "red")
+    acc_ae = np.mean(probs_ae.argmax(1) == y) * 100
+    acc_cnn = np.mean(probs_cnn.argmax(1) == y) * 100
+    fig.suptitle(f"Conjunto de prueba (20%, {n} imágenes no vistas en el entrenamiento)\n"
+                 f"Autoencoder: {acc_ae:.1f}%   |   CNN: {acc_cnn:.1f}%   (verde = acierto, rojo = error)",
+                 fontsize=13)
+    fig.subplots_adjust(hspace=0.65, wspace=0.08, top=1 - 0.7 / filas, bottom=0.25 / filas)
+    guardar(fig, nombre)
 
 # ---------------------------------------------------------------------------
 # Autoencoder: antes y después
@@ -421,7 +446,7 @@ def main():
     X, y, rutas, clases = cargar_datos(args.datos, args.tam)
     print(f"  {len(X)} imágenes, clases: " + ", ".join(f"{c}={np.sum(y == i)}" for i, c in enumerate(clases)))
     X_ent, X_pru, y_ent, y_pru, r_ent, r_pru = train_test_split(
-        X, y, rutas, test_size=0.25, stratify=y, random_state=SEMILLA)
+        X, y, rutas, test_size=PORC_PRUEBA, stratify=y, random_state=SEMILLA)
     X_ent_a, y_ent_a = aumentar(X_ent, y_ent)
     pesos = dict(enumerate(compute_class_weight("balanced", classes=np.unique(y_ent), y=y_ent)))
     forma = X.shape[1:]
@@ -469,6 +494,7 @@ def main():
     graficar_historial([("CNN", h_cnn.history)], "CNN: pérdida y exactitud", "5_cnn_entrenamiento.png")
     pred_cnn = cnn.predict(X_pru, verbose=0)
     graficar_matriz_confusion(y_pru, pred_cnn.argmax(1), clases, "CNN", "6_matriz_confusion_cnn.png")
+    graficar_predicciones_prueba(X_pru, y_pru, pred_ae, pred_cnn, clases, "10_predicciones_prueba.png")
 
     # Imagen a visualizar
     if args.imagen:
