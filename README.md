@@ -9,7 +9,17 @@
    `(Convolución + ReLU → Pooling) ×3 → Flatten → Capa densa → Softmax`.
    Se dibuja cómo la imagen real pasa por cada filtro y capa hasta la probabilidad de cada clase.
 
-## Ejecutar
+## Ejecutar en Google Colab
+
+[![Abrir en Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/jelix062/topicos-de-ia/blob/claude/autoencoders-cnn-filter-viz-bsr00n/clasificador_galaxias_colab.ipynb)
+
+1. Abre `clasificador_galaxias_colab.ipynb` en Colab (con el botón de arriba si el repositorio es público,
+   o desde Colab con `Archivo → Subir cuaderno`).
+2. Opcional: `Entorno de ejecución → Cambiar tipo de entorno → GPU T4`.
+3. `Entorno de ejecución → Ejecutar todo`. En el paso 1 sube `data.zip` (o elige *Google Drive* / *GitHub* en el formulario).
+4. Todas las figuras se muestran debajo de cada celda; al final se descarga `resultados.zip`.
+
+## Ejecutar en local
 
 ```bash
 pip install -r requirements.txt

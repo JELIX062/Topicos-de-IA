@@ -179,7 +179,7 @@ def graficar_autoencoder_antes_despues(X, X_ruido, X_rec, codigos, probs, y, cla
     n = len(X)
     filas = ["ANTES\nOriginal", "ANTES\nEntrada con ruido", "Código latente\n(promedio de mapas)",
              "DESPUÉS\nReconstrucción", "Error |orig - rec|"]
-    fig, ejes = plt.subplots(len(filas), n, figsize=(2.3 * n, 2.4 * len(filas)))
+    fig, ejes = plt.subplots(len(filas), n, figsize=(2.3 * max(n, 2), 2.4 * len(filas)), squeeze=False)
     for j in range(n):
         imgs = [X[j, ..., 0], X_ruido[j, ..., 0], codigos[j].mean(-1),
                 X_rec[j, ..., 0], np.abs(X[j, ..., 0] - X_rec[j, ..., 0])]
@@ -192,8 +192,8 @@ def graficar_autoencoder_antes_despues(X, X_ruido, X_rec, codigos, probs, y, cla
             if j == 0:
                 eje.set_ylabel(filas[i], fontsize=10)
         pred = int(np.argmax(probs[j]))
-        color = "green" if pred == y[j] else "red"
-        ejes[0, j].set_title(f"Real: {clases[y[j]]}", fontsize=10)
+        color = "black" if y[j] < 0 else ("green" if pred == y[j] else "red")
+        ejes[0, j].set_title(f"Real: {clases[y[j]] if y[j] >= 0 else 'desconocida'}", fontsize=10)
         ejes[3, j].set_title(f"Pred: {clases[pred]} ({probs[j][pred]:.0%})", fontsize=10, color=color)
     fig.suptitle("Autoencoder convolucional: imagen ANTES y DESPUÉS del proceso + clasificación", fontsize=14)
     fig.tight_layout()
@@ -387,10 +387,13 @@ def graficar_diagrama_cnn(modelo, imagen, clases, clase_real, nombre):
     ax.text((posiciones_x[0] + posiciones_x[-1] + 8) / 2, 13, "Mapas de características", ha="center", fontsize=14,
             bbox=dict(fc="white", ec="none"))
 
-    resultado = "CORRECTO" if pred == clase_real else "INCORRECTO"
-    ax.text(120, 89, f"Clase real: {clases[clase_real]}   |   Predicción: {clases[pred]} "
-                     f"({probs[pred]:.0%})   [{resultado}]", ha="center", fontsize=14,
-            color="green" if pred == clase_real else "red")
+    if clase_real < 0:  # imagen externa sin etiqueta
+        texto, color = f"Predicción: {clases[pred]} ({probs[pred]:.0%})", "black"
+    else:
+        resultado = "CORRECTO" if pred == clase_real else "INCORRECTO"
+        texto = f"Clase real: {clases[clase_real]}   |   Predicción: {clases[pred]} ({probs[pred]:.0%})   [{resultado}]"
+        color = "green" if pred == clase_real else "red"
+    ax.text(120, 89, texto, ha="center", fontsize=14, color=color)
     ax.set_xlim(0, max(240, x_o + ancho_o + 16))
     guardar(fig, nombre)
     return activs
