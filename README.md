@@ -51,3 +51,27 @@ permite elegir cualquier imagen de ese 20% con un formulario.
 > Nota: el conjunto es pequeño y desbalanceado (130 espirales, 38 lenticulares, 18 elípticas), así que se usan
 > rotaciones/espejos como aumento de datos y pesos por clase. Elípticas y lenticulares se parecen mucho,
 > por eso son las clases que más se confunden.
+
+---
+
+# Clasificador con un autoencoder por clase
+
+`clasificador_autoencoders_por_clase.py` (y el cuaderno `autoencoders_por_clase_colab.ipynb`) entrena **tres
+autoencoders**, cada uno solo con imágenes de su clase (AE-Elliptical, AE-Espiral, AE-Lenticular).
+
+- **Clasificación:** una imagen nueva pasa por los tres; se compara la salida con la entrada (MSE) y gana el
+  autoencoder con **menor error**, es decir, el más cercano.
+- **Binario:** cada autoencoder decide "pertenece a mi clase" si su error es menor que un umbral
+  (el percentil 95 del error en sus imágenes de entrenamiento).
+
+```bash
+python clasificador_autoencoders_por_clase.py                          # 20 épocas, criterio mse
+python clasificador_autoencoders_por_clase.py --criterio normalizado   # divide el error entre el error típico de cada AE
+```
+
+Figuras en `resultados_por_clase/`: entrenamiento de los 3 AE, entrada vs. salida de cada AE, mapas de error,
+errores de todo el conjunto de prueba, matriz de confusión, clasificadores binarios (histogramas + matrices
+sí/no) y todas las predicciones de prueba.
+
+> Con muchas épocas el AE-Espiral (el que tiene más imágenes y más variadas) aprende a reconstruir cualquier
+> galaxia y gana siempre; por eso el valor por defecto es 20 épocas.
