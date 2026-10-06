@@ -67,7 +67,12 @@ autoencoders**, cada uno solo con imágenes de su clase (AE-Elliptical, AE-Espir
 ```bash
 python clasificador_autoencoders_por_clase.py                          # 20 épocas, criterio mse
 python clasificador_autoencoders_por_clase.py --criterio normalizado   # divide el error entre el error típico de cada AE
+python clasificador_autoencoders_por_clase.py --nuevas foto1.jpg carpeta/  # clasifica imágenes nuevas al final
 ```
+
+**Imágenes nuevas:** se sigue entrenando con el 80% y evaluando con el 20%. Además, en Colab la sección 8 permite
+subir imágenes nuevas (sueltas o en un `.zip`) que pasan por los tres autoencoders ya entrenados. Si se conoce su
+clase se puede indicar en el formulario para ver si acertó.
 
 Figuras en `resultados_por_clase/`: entrenamiento de los 3 AE, entrada vs. salida de cada AE, mapas de error,
 errores de todo el conjunto de prueba, matriz de confusión, clasificadores binarios (histogramas + matrices

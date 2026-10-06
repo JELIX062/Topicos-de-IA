@@ -15,6 +15,7 @@ Idea:
 Uso:
     python clasificador_autoencoders_por_clase.py
     python clasificador_autoencoders_por_clase.py --epocas 30 --criterio normalizado
+    python clasificador_autoencoders_por_clase.py --nuevas mi_galaxia.jpg carpeta_con_imagenes/
 
 Las figuras se guardan en la carpeta  resultados_por_clase/
 """
@@ -65,6 +66,23 @@ def cargar_datos(carpeta, tam):
             y.append(i)
             rutas.append(ruta)
     return np.stack(X), np.array(y), np.array(rutas), clases
+
+
+EXTENSIONES = (".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff", ".webp")
+
+
+def cargar_nuevas(rutas, tam):
+    """Carga imágenes nuevas (archivos sueltos o carpetas) con el mismo preprocesamiento."""
+    archivos = []
+    for r in rutas:
+        if os.path.isdir(r):
+            archivos += sorted(f for f in glob.glob(os.path.join(r, "**", "*"), recursive=True)
+                               if f.lower().endswith(EXTENSIONES))
+        elif r.lower().endswith(EXTENSIONES):
+            archivos.append(r)
+    if not archivos:
+        return np.empty((0, tam, tam, 1), "float32"), []
+    return np.stack([cargar_imagen(f, tam) for f in archivos]), archivos
 
 
 def aumentar(X):
@@ -135,6 +153,17 @@ def guardar(fig, nombre):
     print(f"  -> {ruta}")
 
 
+def nombre_real(c, clases):
+    return clases[c] if c >= 0 else "desconocida"
+
+
+def color_resultado(pred, real):
+    """Verde = acierto, rojo = error, azul = imagen nueva sin clase conocida."""
+    if real < 0:
+        return "#1f4fd1"
+    return "green" if pred == real else "red"
+
+
 def graficar_entrenamiento(historias, clases, nombre):
     fig, ejes = plt.subplots(1, len(clases), figsize=(5 * len(clases), 3.8), sharey=True)
     for eje, h, clase, color in zip(ejes, historias, clases, COLORES):
@@ -162,7 +191,7 @@ def graficar_entrada_vs_salida(X, y, autoencoders, clases, nombre, escala=None):
         errores = [np.mean((X[i] - r[i]) ** 2) for r in recs]
         gana = int(np.argmin(errores if escala is None else np.array(errores) / escala))
         ejes[i, 0].imshow(X[i, ..., 0], cmap="gray", vmin=0, vmax=1)
-        ejes[i, 0].set_title(f"ENTRADA\nreal: {clases[y[i]]}", fontsize=9)
+        ejes[i, 0].set_title(f"ENTRADA\nreal: {nombre_real(y[i], clases)}", fontsize=9)
         for j in range(k):
             eje = ejes[i, j + 1]
             eje.imshow(recs[j][i, ..., 0], cmap="gray", vmin=0, vmax=1)
@@ -170,7 +199,7 @@ def graficar_entrada_vs_salida(X, y, autoencoders, clases, nombre, escala=None):
                           weight="bold" if j == gana else "normal")
             if j == gana:
                 eje.add_patch(Rectangle((0, 0), 1, 1, transform=eje.transAxes, fill=False,
-                                        ec="green" if gana == y[i] else "red", lw=5))
+                                        ec=color_resultado(gana, y[i]), lw=5))
         for eje in ejes[i, :k + 1]:
             eje.set_xticks([])
             eje.set_yticks([])
@@ -180,9 +209,9 @@ def graficar_entrada_vs_salida(X, y, autoencoders, clases, nombre, escala=None):
         barras.invert_yaxis()
         barras.tick_params(axis="x", labelsize=7)
         barras.set_title(f"Predicción: {clases[gana]}", fontsize=10, weight="bold",
-                         color="green" if gana == y[i] else "red")
+                         color=color_resultado(gana, y[i]))
     fig.suptitle("Entrada vs. salida de cada autoencoder: gana el que reconstruye con MENOR error\n"
-                 "(marco verde = acierto, rojo = error)", fontsize=13)
+                 "(marco verde = acierto, rojo = error, azul = imagen nueva sin clase conocida)", fontsize=13)
     fig.tight_layout()
     guardar(fig, nombre)
 
@@ -195,7 +224,7 @@ def graficar_mapas_error(X, y, autoencoders, clases, nombre):
     vmax = max(np.abs(X - r).max() for r in recs) * 0.6
     for i in range(n):
         ejes[i, 0].imshow(X[i, ..., 0], cmap="gray")
-        ejes[i, 0].set_title(f"real: {clases[y[i]]}", fontsize=9)
+        ejes[i, 0].set_title(f"real: {nombre_real(y[i], clases)}", fontsize=9)
         for j in range(k):
             ejes[i, j + 1].imshow(np.abs(X[i, ..., 0] - recs[j][i, ..., 0]), cmap="inferno", vmin=0, vmax=vmax)
             ejes[i, j + 1].set_title(f"|entrada − AE-{clases[j]}|", fontsize=9)
@@ -315,6 +344,8 @@ def main():
     p.add_argument("--tam", type=int, default=64)
     p.add_argument("--latente", type=int, default=32, help="tamaño del cuello de botella")
     p.add_argument("--epocas", type=int, default=20)
+    p.add_argument("--nuevas", nargs="*", default=[],
+                   help="imágenes o carpetas NUEVAS a clasificar después de entrenar")
     p.add_argument("--criterio", choices=["mse", "normalizado"], default="mse",
                    help="mse: menor error tal cual | normalizado: error / error típico de cada autoencoder")
     args = p.parse_args()
@@ -362,6 +393,19 @@ def main():
     graficar_matriz_confusion(y_pru, pred, clases, "5_matriz_confusion.png")
     binarios = graficar_binarios(err_pru, y_pru, umbrales, clases, "6_clasificadores_binarios.png")
     graficar_predicciones_prueba(X_pru, y_pru, pred, err_pru, clases, "7_predicciones_prueba.png")
+
+    # ===== 3) Imágenes nuevas (opcional) =====
+    if args.nuevas:
+        X_new, archivos = cargar_nuevas(args.nuevas, args.tam)
+        print(f"\nImágenes nuevas: {len(archivos)}")
+        if archivos:
+            pred_new, err_new, _ = clasificar(autoencoders, X_new, escala)
+            for f, p_, e in zip(archivos, pred_new, err_new):
+                print(f"  {os.path.basename(f):<30} -> {clases[p_]:<11} "
+                      + "  ".join(f"AE-{c}={v:.4f}" for c, v in zip(clases, e)))
+            sin_clase = np.full(len(X_new), -1)
+            graficar_entrada_vs_salida(X_new, sin_clase, autoencoders, clases, "8_nuevas_entrada_vs_salida.png", escala)
+            graficar_mapas_error(X_new, sin_clase, autoencoders, clases, "9_nuevas_mapas_de_error.png")
 
     # ===== Reporte =====
     lineas = ["=== Clasificación final: autoencoder con menor error de reconstrucción ===",
