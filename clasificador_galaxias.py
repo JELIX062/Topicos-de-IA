@@ -8,11 +8,11 @@ Clasificación de galaxias (Elliptical / Espiral / Lenticular) con:
   1) Un SISTEMA DE 6 AUTOENCODERS (dos por clase, en cadena):
        - 3 autoencoders de LIMPIEZA (de-noising), uno por clase: reciben la
          imagen y devuelven una versión limpia (sin ruido ni estrellas).
-       - 3 autoencoders BINARIOS, uno por clase: reciben la imagen limpia y la
-         reconstruyen. Si el error entre su salida y su entrada es pequeño,
-         la imagen "pertenece a su clase" (sí / no).
+       - 3 autoencoders BINARIOS, uno por clase: reciben la imagen limpia, la
+         reconstruyen y, con una neurona sigmoide sobre su código latente,
+         responden "¿pertenece a mi clase?" (sí / no).
      Una imagen nueva pasa por las 3 cadenas (limpieza -> binario) y se asigna a
-     la clase cuyo autoencoder binario la reconstruye con MENOR error.
+     la clase cuyo autoencoder binario da la MAYOR probabilidad de "sí".
 
   2) Una CNN clásica (Convolución + ReLU -> Pooling) x3 -> Flatten -> Densa ->
      Softmax, y se grafica cómo la imagen pasa por cada filtro / capa, al
@@ -219,16 +219,43 @@ def error_relativo(ae, X):
     return mse / (X.var(axis=(1, 2, 3)) + 1e-4), rec
 
 
+def construir_ae_binario_si(forma, latente, nombre):
+    """Autoencoder BINARIO de una clase: reconstruye la imagen limpia Y responde '¿es de mi clase?'.
+
+    Tiene dos salidas: la reconstrucción (decoder) y una neurona sigmoide conectada al código latente
+    que da la probabilidad de 'sí'. Aprender a reconstruir obliga al código latente a resumir la
+    galaxia; la neurona sigmoide aprende qué de ese resumen distingue a su clase de las demás.
+    """
+    base = construir_ae_binario(forma, latente, nombre + "_base")
+    codigo = base.get_layer("codigo_latente").output
+    si = layers.Dense(1, activation="sigmoid", name="si")(layers.Dropout(0.4)(codigo))
+    ae = keras.Model(base.input, [base.output, si], name=nombre)
+    ae.compile(optimizer=keras.optimizers.Adam(1e-3), loss=["mse", "binary_crossentropy"], loss_weights=[1.0, 0.1])
+    return ae
+
+
+def entrenar_binario(ae, X_limpias, es_clase, epocas, validacion):
+    """Entrena con el mismo número de imágenes 'sí' y 'no' (se repiten las de la clase pequeña)."""
+    rng = np.random.default_rng(SEMILLA)
+    pos, neg = np.where(es_clase)[0], np.where(~es_clase)[0]
+    n = max(len(pos), len(neg))
+    sel = np.concatenate([rng.choice(pos, n, replace=len(pos) < n), rng.choice(neg, n, replace=len(neg) < n)])
+    t = es_clase[sel].astype("float32")
+    return ae.fit(X_limpias[sel], [X_limpias[sel], t], epochs=epocas, batch_size=32, shuffle=True, verbose=0,
+                  validation_data=validacion)
+
+
 def pasar_por_autoencoders(limpiadores, binarios, X):
     """Cada imagen pasa por las 3 cadenas  AE-limpieza(c) -> AE-binario(c).
 
-    Devuelve las imágenes limpias, las reconstrucciones y el error (n_imagenes, n_clases) entre
-    la ENTRADA del autoencoder binario (imagen limpia) y su SALIDA.
+    Devuelve las imágenes limpias, las reconstrucciones y P(sí) (n_imagenes, n_clases) de cada
+    autoencoder binario.
     """
     limpias = [ae.predict(X, verbose=0, batch_size=64) for ae in limpiadores]
-    recs = [ae.predict(l, verbose=0, batch_size=64) for ae, l in zip(binarios, limpias)]
-    errores = np.stack([np.mean((l - r) ** 2, axis=(1, 2, 3)) for l, r in zip(limpias, recs)], axis=1)
-    return limpias, recs, errores
+    salidas = [ae.predict(l, verbose=0, batch_size=64) for ae, l in zip(binarios, limpias)]
+    recs = [s_[0] for s_ in salidas]
+    probs = np.stack([s_[1][:, 0] for s_ in salidas], axis=1)
+    return limpias, recs, probs
 
 
 def construir_cnn(forma, n_clases):
@@ -426,14 +453,14 @@ def graficar_limpieza(X, X_ruido, y, limpiadores, clases, nombre):
     guardar(fig, nombre)
 
 
-def graficar_cadena(X, y, limpiadores, binarios, umbrales, clases, nombre):
-    """Recorrido completo: entrada -> limpia(c) -> salida binaria(c) para las 3 clases + decisión."""
+def graficar_cadena(X, y, limpiadores, binarios, clases, nombre):
+    """Recorrido completo: entrada -> limpia(c) -> AE-binario(c) (reconstrucción + 'sí'/'no') + decisión."""
     k = len(clases)
-    limpias, recs, errores = pasar_por_autoencoders(limpiadores, binarios, X)
+    limpias, recs, probs = pasar_por_autoencoders(limpiadores, binarios, X)
     fig, ejes = plt.subplots(len(X), 2 * k + 2, figsize=(2.05 * (2 * k + 2), 2.75 * len(X)), squeeze=False,
                              gridspec_kw={"width_ratios": [1] * (2 * k + 1) + [1.4]})
     for i in range(len(X)):
-        gana = int(errores[i].argmin())
+        gana = int(probs[i].argmax())
         ejes[i, 0].imshow(X[i, ..., 0], cmap="gray", vmin=0, vmax=1)
         ejes[i, 0].set_title(f"ENTRADA\nreal: {nombre_real(y[i], clases)}", fontsize=8.5)
         for j in range(k):
@@ -441,8 +468,7 @@ def graficar_cadena(X, y, limpiadores, binarios, umbrales, clases, nombre):
             e_l.imshow(limpias[j][i, ..., 0], cmap="gray", vmin=0, vmax=1)
             e_l.set_title(f"limpia\n(AE-limpieza {clases[j]})", fontsize=8, color=COLORES[j])
             e_b.imshow(recs[j][i, ..., 0], cmap="gray", vmin=0, vmax=1)
-            si = errores[i, j] <= umbrales[j]
-            e_b.set_title(f"salida AE-binario {clases[j]}\nMSE={errores[i, j]:.4f}  {'SÍ' if si else 'NO'}",
+            e_b.set_title(f"AE-binario {clases[j]}\nP(sí)={probs[i, j]:.2f}  {'SÍ' if probs[i, j] >= 0.5 else 'NO'}",
                           fontsize=8, color=COLORES[j], weight="bold" if j == gana else "normal")
             if j == gana:
                 for e in (e_l, e_b):
@@ -452,29 +478,29 @@ def graficar_cadena(X, y, limpiadores, binarios, umbrales, clases, nombre):
             eje.set_xticks([])
             eje.set_yticks([])
         barras = ejes[i, -1]
-        barras.barh(range(k), errores[i], color=COLORES[:k])
-        for j in range(k):
-            barras.plot([umbrales[j]] * 2, [j - 0.4, j + 0.4], color="red", lw=1.5)
+        barras.barh(range(k), probs[i], color=COLORES[:k])
+        barras.axvline(0.5, color="red", lw=1.5)
+        barras.set_xlim(0, 1)
         barras.set_yticks(range(k), clases, fontsize=8)
         barras.invert_yaxis()
         barras.tick_params(axis="x", labelsize=7)
         barras.set_title(f"Predicción: {clases[gana]}", fontsize=10, weight="bold",
                          color=color_resultado(gana, y[i]))
-    fig.suptitle("Cada imagen pasa por las 3 cadenas  AE-limpieza → AE-binario.  Gana la clase con MENOR error "
-                 "entre la entrada y la salida del AE-binario\n(línea roja = umbral del 'sí'; marco verde = acierto, "
-                 "rojo = error, azul = imagen nueva)", fontsize=12)
+    fig.suptitle("Cada imagen pasa por las 3 cadenas  AE-limpieza → AE-binario.  Cada AE-binario reconstruye la imagen "
+                 "limpia y responde '¿es de mi clase?' (P(sí))\nGana la clase con MAYOR P(sí)  (línea roja = 0.5; "
+                 "marco verde = acierto, rojo = error, azul = imagen nueva)", fontsize=12)
     fig.tight_layout()
     guardar(fig, nombre)
 
 
-def graficar_matriz_errores(errores, y, clases, nombre):
-    """Error de cada imagen de prueba en cada autoencoder binario (filas ordenadas por clase real)."""
+def graficar_matriz_probabilidades(probs, y, clases, nombre):
+    """P(sí) de cada imagen de prueba en cada autoencoder binario (filas ordenadas por clase real)."""
     orden = np.argsort(y, kind="stable")
-    E = errores[orden]
-    fig, eje = plt.subplots(figsize=(6, 0.32 * len(E) + 1.8))
-    im = eje.imshow(E, cmap="viridis_r", aspect="auto")
-    for i, fila in enumerate(E):
-        j = fila.argmin()
+    P = probs[orden]
+    fig, eje = plt.subplots(figsize=(6, 0.32 * len(P) + 1.8))
+    im = eje.imshow(P, cmap="viridis", aspect="auto", vmin=0, vmax=1)
+    for i, fila in enumerate(P):
+        j = fila.argmax()
         eje.add_patch(Rectangle((j - 0.5, i - 0.5), 1, 1, fill=False,
                                 ec="lime" if j == y[orden][i] else "red", lw=2))
     for b in np.cumsum([np.sum(y == c) for c in range(len(clases))])[:-1]:
@@ -482,31 +508,31 @@ def graficar_matriz_errores(errores, y, clases, nombre):
     centros = [np.mean(np.where(y[orden] == c)[0]) for c in range(len(clases))]
     eje.set_yticks(centros, [f"real: {c}" for c in clases])
     eje.set_xticks(range(len(clases)), [f"AE-binario\n{c}" for c in clases])
-    eje.set_title("Error de reconstrucción de cada imagen de prueba\n"
+    eje.set_title("P(sí) de cada imagen de prueba en cada autoencoder binario\n"
                   "cuadro = clase elegida (verde = correcto, rojo = incorrecto)", fontsize=11)
-    fig.colorbar(im, ax=eje, label="MSE (más claro = más cercano)")
+    fig.colorbar(im, ax=eje, label="P(sí es de mi clase)")
     fig.tight_layout()
     guardar(fig, nombre)
 
 
-def graficar_binarios(errores, y, umbrales, clases, nombre):
-    """Cada autoencoder binario por separado: '¿pertenece a mi clase?' (error <= umbral)."""
+def graficar_binarios(probs, y, clases, nombre):
+    """Cada autoencoder binario por separado: '¿pertenece a mi clase?' (P(sí) >= 0.5)."""
     k = len(clases)
     fig, ejes = plt.subplots(2, k, figsize=(5.2 * k, 8), gridspec_kw={"height_ratios": [1.3, 1]})
     resumen = []
+    bins = np.linspace(0, 1, 21)
     for c in range(k):
-        e = errores[:, c]
+        p = probs[:, c]
         eje = ejes[0, c]
-        bins = np.linspace(min(e.min(), umbrales[c]), max(e.max(), umbrales[c]), 16)
-        eje.hist(e[y != c], bins=bins, alpha=0.6, color="gray", label="otras clases")
-        eje.hist(e[y == c], bins=bins, alpha=0.8, color=COLORES[c], label=clases[c])
-        eje.axvline(umbrales[c], color="red", ls="--", label=f"umbral = {umbrales[c]:.4f}")
-        auc = roc_auc_score(y == c, -e)
+        eje.hist(p[y != c], bins=bins, alpha=0.6, color="gray", label="otras clases")
+        eje.hist(p[y == c], bins=bins, alpha=0.8, color=COLORES[c], label=clases[c])
+        eje.axvline(0.5, color="red", ls="--", label="umbral = 0.5")
+        auc = roc_auc_score(y == c, p)
         eje.set_title(f"AE-binario {clases[c]}  (AUC = {auc:.2f})")
-        eje.set_xlabel("error de reconstrucción (MSE)")
+        eje.set_xlabel("P(sí es de mi clase)")
         eje.legend(fontsize=8)
 
-        cm = confusion_matrix((y == c).astype(int), (e <= umbrales[c]).astype(int), labels=[1, 0])
+        cm = confusion_matrix((y == c).astype(int), (p >= 0.5).astype(int), labels=[1, 0])
         eje = ejes[1, c]
         eje.imshow(cm, cmap="Blues")
         for i in range(2):
@@ -516,13 +542,12 @@ def graficar_binarios(errores, y, umbrales, clases, nombre):
         etiquetas = [f"Sí es {clases[c]}", "No es"]
         eje.set_xticks([0, 1], etiquetas)
         eje.set_yticks([0, 1], etiquetas)
-        eje.set_xlabel("Predicción (error ≤ umbral)")
+        eje.set_xlabel("Predicción (P(sí) ≥ 0.5)")
         eje.set_ylabel("Real")
         acc = (cm[0, 0] + cm[1, 1]) / cm.sum()
         eje.set_title(f"Binario {clases[c]} vs. resto: exactitud = {acc:.1%}")
-        resumen.append((clases[c], umbrales[c], auc, acc, cm))
-    fig.suptitle("Etapa 2 — Cada AUTOENCODER BINARIO por separado: si el error es menor que el umbral, "
-                 "'pertenece a mi clase'", fontsize=13)
+        resumen.append((clases[c], 0.5, auc, acc, cm))
+    fig.suptitle("Etapa 2 — Cada AUTOENCODER BINARIO por separado: '¿la imagen pertenece a mi clase?'", fontsize=13)
     fig.tight_layout()
     guardar(fig, nombre)
     return resumen
@@ -736,7 +761,7 @@ def main():
     p.add_argument("--tam", type=int, default=64, help="tamaño (px) al que se redimensionan las imágenes")
     p.add_argument("--epocas-detector", type=int, default=20)
     p.add_argument("--epocas-limpieza", type=int, default=20)
-    p.add_argument("--epocas-binario", type=int, default=20)
+    p.add_argument("--epocas-binario", type=int, default=25)
     p.add_argument("--epocas-cnn", type=int, default=40)
     p.add_argument("--latente", type=int, default=32, help="cuello de botella de los autoencoders binarios")
     p.add_argument("--ruido", type=float, default=0.15, help="ruido gaussiano para entrenar la limpieza")
@@ -798,31 +823,29 @@ def main():
 
     # ================= 2) AUTOENCODERS BINARIOS (uno por clase) =================
     print("\n[2/3] Entrenando los 3 autoencoders BINARIOS con las imágenes ya limpias...")
-    binarios, h_binario, umbrales = [], [], []
+    binarios, h_binario = [], []
     for c, clase in enumerate(clases):
-        X_c = limpiadores[c].predict(aumentar(X_ent[y_ent == c], y_ent[y_ent == c])[0], verbose=0)
-        X_v = limpiadores[c].predict(X_pru[y_pru == c], verbose=0)
-        ae = construir_ae_binario(forma, args.latente, f"AE_binario_{clase}")
-        h = entrenar_ae(ae, X_c, X_c, args.epocas_binario, (X_v, X_v))
+        # Cada AE-binario ve TODAS las clases (limpias por su AE-limpieza): las de su clase son "sí", las demás "no"
+        X_l = limpiadores[c].predict(X_ent_a, verbose=0)
+        X_v = limpiadores[c].predict(X_pru, verbose=0)
+        ae = construir_ae_binario_si(forma, args.latente, f"AE_binario_{clase}")
+        h = entrenar_binario(ae, X_l, y_ent_a == c, args.epocas_binario,
+                             (X_v, [X_v, (y_pru == c).astype("float32")]))
         binarios.append(ae)
         h_binario.append(h.history)
-        # Umbral del "sí": el error que no supera el 95% de las imágenes de entrenamiento de su clase
-        err_c = pasar_por_autoencoders([limpiadores[c]], [ae], X_ent[y_ent == c])[2][:, 0]
-        umbrales.append(float(np.percentile(err_c, 95)))
-        print(f"  AE-binario  {clase:<11} MSE = {h.history['loss'][-1]:.5f}   umbral del 'sí' = {umbrales[-1]:.5f}")
-    graficar_entrenamiento_aes(h_binario, clases, "Etapa 2 — Autoencoders BINARIOS (imagen limpia → "
-                               "reconstrucción)", "3_ae_binario_entrenamiento.png")
+        print(f"  AE-binario  {clase:<11} pérdida = {h.history['loss'][-1]:.4f}")
+    graficar_entrenamiento_aes(h_binario, clases, "Etapa 2 — Autoencoders BINARIOS (reconstrucción + "
+                               "'¿es de mi clase?')", "3_ae_binario_entrenamiento.png")
 
     # ================= 3) CLASIFICAR CON LOS 6 AUTOENCODERS =================
-    _, _, err_pru = pasar_por_autoencoders(limpiadores, binarios, X_pru)
-    pred_ae = err_pru.argmin(axis=1)
+    _, _, prob_pru = pasar_por_autoencoders(limpiadores, binarios, X_pru)
+    pred_ae = prob_pru.argmax(axis=1)
     print(f"\nExactitud del sistema de autoencoders: {np.mean(pred_ae == y_pru):.1%}")
-    graficar_cadena(X_pru[idx], y_pru[idx], limpiadores, binarios, umbrales, clases,
-                    "4_ae_cadena_limpieza_binario.png")
-    graficar_matriz_errores(err_pru, y_pru, clases, "5_ae_errores_prueba.png")
+    graficar_cadena(X_pru[idx], y_pru[idx], limpiadores, binarios, clases, "4_ae_cadena_limpieza_binario.png")
+    graficar_matriz_probabilidades(prob_pru, y_pru, clases, "5_ae_probabilidades_prueba.png")
     graficar_matriz_confusion(y_pru, pred_ae, clases, "6 autoencoders (limpieza + binario)",
                               "6_matriz_confusion_autoencoders.png")
-    res_binarios = graficar_binarios(err_pru, y_pru, umbrales, clases, "7_ae_binarios.png")
+    res_binarios = graficar_binarios(prob_pru, y_pru, clases, "7_ae_binarios.png")
 
     # ================= 4) CNN =================
     print("\n[3/3] Entrenando CNN...")
@@ -861,15 +884,15 @@ def main():
             es_galaxia, err_d = graficar_deteccion(X_new, [os.path.basename(f) for f in archivos], detector,
                                                    umbral_galaxia, "14_nuevas_detector.png")
             # Paso 2: solo las galaxias se clasifican
-            _, _, err_new = pasar_por_autoencoders(limpiadores, binarios, X_new)
+            _, _, prob_new = pasar_por_autoencoders(limpiadores, binarios, X_new)
             p_cnn = cnn.predict(X_new, verbose=0).argmax(1)
-            for f, g, ed, e, pc in zip(archivos, es_galaxia, err_d, err_new, p_cnn):
-                resultado = (f"6 AE -> {clases[e.argmin()]:<11} CNN -> {clases[pc]}" if g
+            for f, g, ed, pr, pc in zip(archivos, es_galaxia, err_d, prob_new, p_cnn):
+                resultado = (f"6 AE -> {clases[pr.argmax()]:<11} CNN -> {clases[pc]}" if g
                              else "NO ES UNA GALAXIA (no se clasifica)")
                 print(f"  {os.path.basename(f):<30} detector={ed:.3f}  {resultado}")
             if es_galaxia.any():
-                graficar_cadena(X_new[es_galaxia], np.full(es_galaxia.sum(), -1), limpiadores, binarios, umbrales,
-                                clases, "15_nuevas_cadena_autoencoders.png")
+                graficar_cadena(X_new[es_galaxia], np.full(es_galaxia.sum(), -1), limpiadores, binarios, clases,
+                                "15_nuevas_cadena_autoencoders.png")
 
     # ================= Resumen =================
     reporte = [f"Prueba: {n_prueba} imágenes por clase ({PORC_PRUEBA:.0%} de la clase más pequeña)",
@@ -877,7 +900,7 @@ def main():
                f"Galaxias de prueba aceptadas: {np.sum(err_det_pru <= umbral_galaxia)} de {len(err_det_pru)}",
                f"Imágenes que NO son galaxias rechazadas: {np.sum(err_det_no > umbral_galaxia)} de {len(err_det_no)} "
                f"({', '.join(nombres_no)})", "",
-               "=== Sistema de 6 autoencoders (limpieza -> binario, gana el menor error) ===",
+               "=== Sistema de 6 autoencoders (limpieza -> binario, gana la mayor P(sí)) ===",
                classification_report(y_pru, pred_ae, labels=range(len(clases)), target_names=clases,
                                      zero_division=0),
                "--- Cada autoencoder binario por separado (clase vs. resto) ---"]

@@ -9,9 +9,12 @@
 1. **Sistema de 6 autoencoders, dos por clase y en cadena:**
    - **3 autoencoders de limpieza** (de-noising): cada uno aprende, solo con su clase, a recibir una imagen con
      ruido y devolverla limpia.
-   - **3 autoencoders binarios**: cada uno reconstruye las imágenes ya limpias de su clase. Si el error entre su
-     salida y su entrada es menor que un umbral, la imagen "sí pertenece" a su clase.
-   - Una imagen pasa por las 3 cadenas *limpieza → binario* y se asigna a la clase con **menor error**.
+   - **3 autoencoders binarios**: cada uno recibe la imagen limpia, la reconstruye y, con una neurona sigmoide
+     conectada a su código latente, responde "¿pertenece a mi clase?" (probabilidad de sí). Se entrenan con todas
+     las clases: las de su clase son "sí" y las demás "no", en igual número.
+   - Una imagen pasa por las 3 cadenas *limpieza → binario* y se asigna a la clase con **mayor probabilidad de sí**.
+   - Comparar solo el error de reconstrucción no funcionó (quedaba al azar y casi todo caía en una sola clase):
+     cada autoencoder de limpieza "empuja" la imagen hacia su propia clase y los tres errores quedaban parecidos.
 2. **CNN** con la misma estructura que el diagrama clásico:
    `(Convolución + ReLU → Pooling) ×3 → Flatten → Capa densa → Softmax`.
    Se dibuja cómo la imagen real pasa por cada filtro y capa hasta la probabilidad de cada clase.
@@ -50,9 +53,9 @@ python clasificador_galaxias.py --help                          # épocas, ruido
 | `2_ae_limpieza_antes_despues.png` | **Antes** (original y con ruido) y **después** (limpia por cada AE) |
 | `3_ae_binario_entrenamiento.png` | Curvas de los 3 autoencoders binarios |
 | `4_ae_cadena_limpieza_binario.png` | **Recorrido completo**: entrada → limpia → salida binaria de cada clase, errores y decisión |
-| `5_ae_errores_prueba.png` | Error de cada imagen de prueba en cada autoencoder binario |
+| `5_ae_probabilidades_prueba.png` | P(sí) de cada imagen de prueba en cada autoencoder binario |
 | `6_matriz_confusion_autoencoders.png` | Matriz de confusión del sistema de 6 autoencoders |
-| `7_ae_binarios.png` | Cada autoencoder binario por separado: histogramas, umbral y matriz sí/no |
+| `7_ae_binarios.png` | Cada autoencoder binario por separado: histogramas de P(sí) y matriz sí/no |
 | `8_cnn_entrenamiento.png` | Pérdida y exactitud de la CNN |
 | `9_matriz_confusion_cnn.png` | Matriz de confusión de la CNN |
 | `10_predicciones_prueba.png` | Todas las imágenes de prueba con la predicción de ambos modelos |
