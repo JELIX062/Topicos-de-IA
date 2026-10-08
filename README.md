@@ -3,6 +3,9 @@
 `clasificador_galaxias.py` (y el cuaderno `clasificador_galaxias_colab.ipynb`) clasifica las imágenes de `data/`
 (Elliptical, Espiral, Lenticular) de dos formas:
 
+0. **Autoencoder detector de galaxias:** se entrena con todas las galaxias. Si una imagen nueva no se parece a una
+   galaxia, la reconstruye mal (error relativo = MSE / varianza de la imagen mayor que el umbral) y se rechaza como
+   "no es una galaxia" antes de clasificarla.
 1. **Sistema de 6 autoencoders, dos por clase y en cadena:**
    - **3 autoencoders de limpieza** (de-noising): cada uno aprende, solo con su clase, a recibir una imagen con
      ruido y devolverla limpia.
@@ -41,6 +44,8 @@ python clasificador_galaxias.py --help                          # épocas, ruido
 
 | Archivo | Contenido |
 |---|---|
+| `0_detector_histograma.png` | Error del detector en galaxias y en imágenes que no son galaxias, con el umbral |
+| `0_detector_ejemplos.png` | Galaxias y no-galaxias (persona, texto, ruido…), su reconstrucción y el veredicto |
 | `1_ae_limpieza_entrenamiento.png` | Curvas de los 3 autoencoders de limpieza |
 | `2_ae_limpieza_antes_despues.png` | **Antes** (original y con ruido) y **después** (limpia por cada AE) |
 | `3_ae_binario_entrenamiento.png` | Curvas de los 3 autoencoders binarios |
@@ -54,7 +59,8 @@ python clasificador_galaxias.py --help                          # épocas, ruido
 | `11_cnn_diagrama_<clase>.png` | **Diagrama de la CNN con los mapas reales** de cada capa, flatten, capa densa y softmax |
 | `12_cnn_mapas_por_capa_<clase>.png` | Los 16 mapas más activos de cada capa (conv1 → pool3) |
 | `13_cnn_filtros_conv1_<clase>.png` | Cada kernel 3×3 aprendido y el mapa que produce |
-| `14_nuevas_cadena_autoencoders.png` | (con `--nuevas`) recorrido de las imágenes nuevas por los 6 autoencoders |
+| `14_nuevas_detector.png` | (con `--nuevas`) ¿es galaxia o no? para cada imagen nueva |
+| `15_nuevas_cadena_autoencoders.png` | (con `--nuevas`) recorrido de las imágenes nuevas que sí son galaxias |
 | `reporte.txt` | Precisión, recall y F1 de ambos modelos y de cada autoencoder binario |
 
 En Colab, la sección 7 permite elegir cualquier imagen de prueba con un formulario y la sección 8 subir imágenes

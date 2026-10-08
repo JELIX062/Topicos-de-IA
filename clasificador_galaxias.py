@@ -1,6 +1,10 @@
 """
 Clasificación de galaxias (Elliptical / Espiral / Lenticular) con:
 
+  0) Un AUTOENCODER DETECTOR DE GALAXIAS: aprende a reconstruir galaxias (de
+     cualquier clase). Si una imagen nueva no se parece a una galaxia, la
+     reconstruye mal y se rechaza como "no es una galaxia".
+
   1) Un SISTEMA DE 6 AUTOENCODERS (dos por clase, en cadena):
        - 3 autoencoders de LIMPIEZA (de-noising), uno por clase: reciben la
          imagen y devuelven una versión limpia (sin ruido ni estrellas).
@@ -95,6 +99,38 @@ def dividir_prueba_igual(y, porc, semilla):
     return idx_ent, np.sort(idx_pru), n_prueba
 
 
+def ejemplos_no_galaxias(tam):
+    """Imágenes que NO son galaxias, generadas aquí mismo, para probar el detector sin subir nada."""
+    from matplotlib import cbook
+    from PIL import ImageDraw
+    imgs = {}
+    for archivo, nombre in [("grace_hopper.jpg", "persona"), ("Minduka_Present_Blue_Pack.png", "regalo"),
+                            ("logo2.png", "logotipo")]:
+        try:  # fotos de ejemplo que vienen incluidas con matplotlib
+            imgs[nombre] = Image.open(cbook.get_sample_data(archivo, asfileobj=False))
+        except (OSError, ValueError):
+            pass
+    texto = Image.new("L", (300, 300), 255)
+    dibujo = ImageDraw.Draw(texto)
+    for i in range(8):
+        dibujo.text((20, 20 + 32 * i), "Topicos de IA - galaxias " * 2, fill=0)
+    imgs["texto"] = texto
+    fig, eje = plt.subplots(figsize=(4, 3))
+    eje.plot(np.random.default_rng(0).normal(size=50).cumsum())
+    fig.canvas.draw()
+    imgs["gráfica"] = Image.fromarray(np.asarray(fig.canvas.buffer_rgba()))
+    plt.close(fig)
+    r = np.random.default_rng(1)
+    imgs["ruido"] = Image.fromarray((r.random((200, 200)) * 255).astype("uint8"))
+    imgs["degradado"] = Image.fromarray(np.tile(np.linspace(0, 255, 200), (200, 1)).astype("uint8"))
+    imgs["ajedrez"] = Image.fromarray(((np.indices((200, 200)) // 25).sum(0) % 2 * 255).astype("uint8"))
+    imgs["negro"] = Image.new("L", (200, 200), 0)
+    imgs["blanco"] = Image.new("L", (200, 200), 255)
+    X = np.stack([np.asarray(ImageOps.fit(im.convert("L"), (tam, tam), Image.LANCZOS), dtype="float32")[..., None]
+                  / 255.0 for im in imgs.values()])
+    return X, list(imgs)
+
+
 EXTENSIONES = (".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff", ".webp")
 
 
@@ -170,6 +206,17 @@ def entrenar_ae(ae, X_entrada, X_objetivo, epocas, validacion, ruido=0.0):
         ds = ds.map(lambda a, b: (tf.clip_by_value(a + ruido * tf.random.normal(tf.shape(a)), 0.0, 1.0), b))
     return ae.fit(ds, epochs=epocas, steps_per_epoch=PASOS_POR_EPOCA, validation_data=validacion,
                   verbose=0, shuffle=False)
+
+
+def error_relativo(ae, X):
+    """Error de reconstrucción dividido entre la varianza (contraste) de la imagen: MSE / var.
+
+    Así una imagen casi plana (toda negra, toda blanca, ruido...) no "pasa" como galaxia solo por
+    tener poco que reconstruir.
+    """
+    rec = ae.predict(X, verbose=0, batch_size=64)
+    mse = np.mean((X - rec) ** 2, axis=(1, 2, 3))
+    return mse / (X.var(axis=(1, 2, 3)) + 1e-4), rec
 
 
 def pasar_por_autoencoders(limpiadores, binarios, X):
@@ -288,6 +335,55 @@ def color_resultado(pred, real):
     if real < 0:
         return "#1f4fd1"
     return "green" if pred == real else "red"
+
+
+def graficar_detector(err_entrenamiento, grupos, umbral, nombre):
+    """Histograma del error relativo del detector: galaxias de entrenamiento vs. otras imágenes."""
+    todos = np.concatenate([err_entrenamiento] + [g[1] for g in grupos])
+    bins = np.logspace(np.log10(todos.min() * 0.9), np.log10(todos.max() * 1.1), 45)
+    fig, eje = plt.subplots(figsize=(11, 4.3))
+    eje.hist(err_entrenamiento, bins=bins, color="#1f77b4", alpha=0.7, label="galaxias de entrenamiento")
+    for etiqueta, e, color in grupos:
+        eje.hist(e, bins=bins, color=color, alpha=0.75, label=etiqueta)
+    eje.axvline(umbral, color="red", ls="--", lw=2, label=f"umbral = {umbral:.3f}")
+    eje.axvspan(bins[0], umbral, color="green", alpha=0.06)
+    eje.axvspan(umbral, bins[-1], color="red", alpha=0.06)
+    eje.text(umbral / 1.15, eje.get_ylim()[1] * 0.92, "← GALAXIA", ha="right", color="green", weight="bold")
+    eje.text(umbral * 1.15, eje.get_ylim()[1] * 0.92, "NO ES GALAXIA →", ha="left", color="red", weight="bold")
+    eje.set_xscale("log")
+    eje.set_xlabel("error relativo de reconstrucción (MSE / varianza de la imagen), escala logarítmica")
+    eje.set_ylabel("número de imágenes")
+    eje.legend(fontsize=9, loc="center right")
+    eje.set_title("Etapa 0 — Autoencoder DETECTOR DE GALAXIAS: si reconstruye bien la imagen, es una galaxia")
+    fig.tight_layout()
+    guardar(fig, nombre)
+
+
+def graficar_deteccion(X, nombres, detector, umbral, nombre, columnas=8):
+    """Entrada (arriba), reconstrucción del detector (abajo) y veredicto de cada imagen."""
+    err, rec = error_relativo(detector, X)
+    n = len(X)
+    columnas = min(columnas, n)
+    filas = int(np.ceil(n / columnas))
+    fig, ejes = plt.subplots(2 * filas, columnas, figsize=(2.15 * max(columnas, 2), 4.7 * filas), squeeze=False)
+    for eje in ejes.flat:
+        eje.axis("off")
+    for k in range(n):
+        f, c = divmod(k, columnas)
+        es = err[k] <= umbral
+        color = "green" if es else "red"
+        ejes[2 * f, c].imshow(X[k, ..., 0], cmap="gray", vmin=0, vmax=1)
+        ejes[2 * f, c].set_title(str(nombres[k])[:20], fontsize=8)
+        ejes[2 * f + 1, c].imshow(rec[k, ..., 0], cmap="gray", vmin=0, vmax=1)
+        ejes[2 * f + 1, c].set_title(f"error = {err[k]:.2f}\n{'GALAXIA' if es else 'NO ES GALAXIA'}", fontsize=9,
+                                     color=color, weight="bold")
+        for eje in (ejes[2 * f, c], ejes[2 * f + 1, c]):
+            eje.add_patch(Rectangle((0, 0), 1, 1, transform=eje.transAxes, fill=False, ec=color, lw=3))
+    fig.suptitle(f"Detector de galaxias: imagen (arriba) y lo que reconstruye el autoencoder detector (abajo)\n"
+                 f"si el error relativo ≤ {umbral:.3f} → es una galaxia", fontsize=12)
+    fig.tight_layout()
+    guardar(fig, nombre)
+    return err <= umbral, err
 
 
 def graficar_entrenamiento_aes(historias, clases, titulo, nombre):
@@ -638,6 +734,7 @@ def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--datos", default="data", help="carpeta con una subcarpeta por clase")
     p.add_argument("--tam", type=int, default=64, help="tamaño (px) al que se redimensionan las imágenes")
+    p.add_argument("--epocas-detector", type=int, default=20)
     p.add_argument("--epocas-limpieza", type=int, default=20)
     p.add_argument("--epocas-binario", type=int, default=20)
     p.add_argument("--epocas-cnn", type=int, default=40)
@@ -661,6 +758,26 @@ def main():
         print(f"  {clase:<11} entrenamiento: {np.sum(y_ent == c):3d}   prueba: {np.sum(y_pru == c)}")
     forma = X.shape[1:]
     idx = np.concatenate([np.where(y_pru == c)[0][:2] for c in range(len(clases))])  # ejemplos para graficar
+
+    X_ent_a, y_ent_a = aumentar(X_ent, y_ent)  # 8 rotaciones/espejos por imagen
+
+    # ================= 0) AUTOENCODER DETECTOR DE GALAXIAS =================
+    print("\n[0/3] Entrenando el autoencoder DETECTOR DE GALAXIAS (con todas las galaxias de entrenamiento)...")
+    detector = construir_ae_binario(forma, args.latente, "AE_detector_galaxias")
+    entrenar_ae(detector, X_ent_a, X_ent_a, args.epocas_detector, (X_pru, X_pru))
+    err_det_ent = error_relativo(detector, X_ent)[0]
+    umbral_galaxia = float(np.percentile(err_det_ent, 99))  # el 99% de las galaxias de entrenamiento queda debajo
+    X_no, nombres_no = ejemplos_no_galaxias(args.tam)
+    err_det_pru = error_relativo(detector, X_pru)[0]
+    err_det_no = error_relativo(detector, X_no)[0]
+    print(f"  umbral = {umbral_galaxia:.3f} | galaxias de prueba aceptadas: {np.mean(err_det_pru <= umbral_galaxia):.0%}"
+          f" | imágenes que NO son galaxias rechazadas: {np.mean(err_det_no > umbral_galaxia):.0%}")
+    graficar_detector(err_det_ent, [("galaxias de prueba", err_det_pru, "#2ca02c"),
+                                    ("imágenes que NO son galaxias", err_det_no, "#d62728")],
+                      umbral_galaxia, "0_detector_histograma.png")
+    graficar_deteccion(np.concatenate([X_pru[idx[::2]], X_no]),
+                       [os.path.basename(r) for r in r_pru[idx[::2]]] + nombres_no,
+                       detector, umbral_galaxia, "0_detector_ejemplos.png")
 
     # ================= 1) AUTOENCODERS DE LIMPIEZA (uno por clase) =================
     print("\n[1/3] Entrenando los 3 autoencoders de LIMPIEZA...")
@@ -709,7 +826,6 @@ def main():
 
     # ================= 4) CNN =================
     print("\n[3/3] Entrenando CNN...")
-    X_ent_a, y_ent_a = aumentar(X_ent, y_ent)
     pesos = dict(enumerate(compute_class_weight("balanced", classes=np.unique(y_ent), y=y_ent)))
     cnn = construir_cnn(forma, len(clases))
     cnn.summary()
@@ -741,15 +857,26 @@ def main():
         X_new, archivos = cargar_nuevas(args.nuevas, args.tam)
         print(f"\nImágenes nuevas: {len(archivos)}")
         if archivos:
+            # Paso 1: ¿es una galaxia?
+            es_galaxia, err_d = graficar_deteccion(X_new, [os.path.basename(f) for f in archivos], detector,
+                                                   umbral_galaxia, "14_nuevas_detector.png")
+            # Paso 2: solo las galaxias se clasifican
             _, _, err_new = pasar_por_autoencoders(limpiadores, binarios, X_new)
             p_cnn = cnn.predict(X_new, verbose=0).argmax(1)
-            for f, e, pc in zip(archivos, err_new, p_cnn):
-                print(f"  {os.path.basename(f):<30} 6 AE -> {clases[e.argmin()]:<11} CNN -> {clases[pc]}")
-            graficar_cadena(X_new, np.full(len(X_new), -1), limpiadores, binarios, umbrales, clases,
-                            "14_nuevas_cadena_autoencoders.png")
+            for f, g, ed, e, pc in zip(archivos, es_galaxia, err_d, err_new, p_cnn):
+                resultado = (f"6 AE -> {clases[e.argmin()]:<11} CNN -> {clases[pc]}" if g
+                             else "NO ES UNA GALAXIA (no se clasifica)")
+                print(f"  {os.path.basename(f):<30} detector={ed:.3f}  {resultado}")
+            if es_galaxia.any():
+                graficar_cadena(X_new[es_galaxia], np.full(es_galaxia.sum(), -1), limpiadores, binarios, umbrales,
+                                clases, "15_nuevas_cadena_autoencoders.png")
 
     # ================= Resumen =================
     reporte = [f"Prueba: {n_prueba} imágenes por clase ({PORC_PRUEBA:.0%} de la clase más pequeña)",
+               f"=== Detector de galaxias (umbral = {umbral_galaxia:.3f}) ===",
+               f"Galaxias de prueba aceptadas: {np.sum(err_det_pru <= umbral_galaxia)} de {len(err_det_pru)}",
+               f"Imágenes que NO son galaxias rechazadas: {np.sum(err_det_no > umbral_galaxia)} de {len(err_det_no)} "
+               f"({', '.join(nombres_no)})", "",
                "=== Sistema de 6 autoencoders (limpieza -> binario, gana el menor error) ===",
                classification_report(y_pru, pred_ae, labels=range(len(clases)), target_names=clases,
                                      zero_division=0),
