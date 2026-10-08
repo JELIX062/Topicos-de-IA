@@ -94,3 +94,38 @@ sí/no) y todas las predicciones de prueba.
 
 > Con muchas épocas el AE-Espiral (el que tiene más imágenes y más variadas) aprende a reconstruir cualquier
 > galaxia y gana siempre; por eso el valor por defecto es 20 épocas.
+
+---
+
+# YOLO paso a paso: Backbone → Neck → Head
+
+`yolo_visualizacion.py` (y el cuaderno `yolo_visualizacion_colab.ipynb`) usa **YOLO26n** preentrenado en COCO y recorre la
+red **capa por capa**, graficando cada etapa como en la presentación. La decodificación de cajas (sin DFL), el **NMS** y
+la selección **One-to-One** están programados a mano y se comparan con el resultado oficial de Ultralytics.
+
+[![Abrir en Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/jelix062/topicos-de-ia/blob/claude/amazing-goldberg-4y31go/yolo_visualizacion_colab.ipynb)
+
+En Colab: `Entorno de ejecución → Ejecutar todo` (no necesita GPU). En el paso 1 se elige la imagen de ejemplo, se sube
+una propia o se da una URL, y se ajustan la confianza, el IoU del NMS y el tamaño del modelo (n, s, m, l, x).
+
+```bash
+pip install -r requirements_yolo.txt
+python yolo_visualizacion.py                          # imagen de ejemplo (bus.jpg)
+python yolo_visualizacion.py --imagen foto.jpg --conf 0.3 --iou 0.7 --modelo yolo26s.pt
+```
+
+| Archivo en `resultados_yolo/` | Diapositiva | Contenido |
+|---|---|---|
+| `00_pipeline_completo.png` | Inferencia completa | Los 8 pasos con miniaturas reales |
+| `01_clasificar_vs_detectar.png` | Introducción | Solo la clase vs clase + caja + confianza |
+| `02_preprocesamiento.png` | Paso 2 | Letterbox 640×640 + normalización 0-1 |
+| `03_backbone.png`, `04_backbone_canales_por_capa.png` | Backbone | Mapa de cada capa (0-10) y sus canales más activos |
+| `05_c3k2_interno_capa*.png` | C3k2 | Conv 1×1 → rama directa / bloques → concat |
+| `06_sppf.png` | SPPF | MaxPool ×3 (ventanas 5, 9, 13) + residual |
+| `07_c2psa_atencion.png` | C2PSA | 50% atención / 50% directo y la matriz de atención real |
+| `08_neck_fusion_multiescala.png` | Neck | Arriba→abajo y abajo→arriba hasta P3 / P4 / P5 |
+| `09_head_mapas_de_clase.png` | Detection Head | Probabilidad de clase por celda en cada escala y cabeza |
+| `10_head_regresion_directa.png` | Sin DFL | Las 4 distancias l, t, r, b y el cálculo de la caja |
+| `11_nms_vs_nms_free.png` | NMS vs NMS-free | Cajas eliminadas por el NMS vs salida directa One-to-One |
+| `12_resultado_final.png` | Pasos 7-8 | Objetos detectados y tabla `[x1, y1, x2, y2, conf, clase]` |
+| `reporte.txt` | | Forma de la salida de cada capa y comparación con Ultralytics |

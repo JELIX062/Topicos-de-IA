@@ -1,0 +1,53 @@
+Modelo: yolo26n.pt  ·  2.57 M parámetros  ·  80 clases (COCO)
+Imagen: /usr/local/lib/python3.13/dist-packages/ultralytics/assets/bus.jpg  (810x1080)  ->  letterbox 640x640, escala 0.5926, relleno (80, 0)
+
+Capa  Bloque              Entrada desde   Salida
+   0  Conv s2             -1              16×320×320
+   1  Conv s2             -1              32×160×160
+   2  C3k2                -1              64×160×160
+   3  Conv s2             -1              64×80×80
+   4  C3k2                -1              128×80×80
+   5  Conv s2             -1              128×40×40
+   6  C3k2                -1              128×40×40
+   7  Conv s2             -1              256×20×20
+   8  C3k2                -1              256×20×20
+   9  SPPF                -1              256×20×20
+  10  C2PSA               -1              256×20×20
+  11  Upsample ×2         -1              256×40×40
+  12  Concat              [-1, 6]         384×40×40
+  13  C3k2                -1              128×40×40
+  14  Upsample ×2         -1              128×80×80
+  15  Concat              [-1, 4]         256×80×80
+  16  C3k2 → P3           -1              64×80×80
+  17  Conv s2             -1              64×40×40
+  18  Concat              [-1, 13]        192×40×40
+  19  C3k2 → P4           -1              128×40×40
+  20  Conv s2             -1              128×20×20
+  21  Concat              [-1, 10]        384×20×20
+  22  C3k2 → P5           -1              256×20×20
+  23  Detect (dual-head)  [16, 19, 22]    8400 celdas x (4 caja + 80 clases)
+
+Cabeza One-to-Many: 46 candidatos > 0.25 -> NMS (IoU 0.7) elimina 41 -> 5 objetos
+Cabeza One-to-One : 5 candidatos > 0.25 -> sin NMS -> 5 objetos
+
+Detecciones finales (One-to-One, NMS-free)  [x1, y1, x2, y2, confianza, clase]:
+  [    8.6,   228.6,   807.0,   749.0, 0.925, bus]
+  [   46.0,   398.2,   238.0,   901.8, 0.918, person]
+  [  223.0,   404.8,   345.0,   862.3, 0.900, person]
+  [  668.9,   391.3,   810.0,   879.6, 0.860, person]
+  [    0.0,   553.1,    67.9,   874.8, 0.496, person]
+
+Detecciones One-to-Many + NMS:
+  [   10.0,   229.9,   802.4,   747.4, 0.908, bus]
+  [   46.4,   397.1,   238.7,   901.6, 0.859, person]
+  [  223.4,   406.7,   345.6,   860.5, 0.850, person]
+  [  669.7,   388.0,   810.0,   880.2, 0.831, person]
+  [    0.0,   551.9,    63.0,   873.1, 0.530, person]
+
+Comprobación: model.predict() oficial de Ultralytics -> 5 objetos
+  [    0.0,   230.5,   803.2,   750.7, 0.881, bus]
+  [   48.6,   397.7,   240.3,   902.4, 0.872, person]
+  [  222.9,   404.8,   345.5,   861.0, 0.861, person]
+  [  669.6,   394.5,   809.9,   879.4, 0.846, person]
+  [    0.2,   553.0,    59.7,   871.3, 0.656, person]
+  (pueden variar ligeramente: Ultralytics usa un letterbox rectangular, aquí uno cuadrado 640x640)
