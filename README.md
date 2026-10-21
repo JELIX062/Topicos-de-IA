@@ -97,3 +97,23 @@ sí/no) y todas las predicciones de prueba.
 
 > Con muchas épocas el AE-Espiral (el que tiene más imágenes y más variadas) aprende a reconstruir cualquier
 > galaxia y gana siempre; por eso el valor por defecto es 20 épocas.
+
+---
+
+# Problema secuencial: ConvLSTM vs. CNN vs. ANN
+
+[![Abrir en Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/jelix062/topicos-de-ia/blob/claude/peaceful-bardeen-j3kfec/convlstm_vs_cnn_vs_ann_colab.ipynb)
+
+`convlstm_vs_cnn_vs_ann_colab.ipynb` genera videos cortos (10 cuadros de 20×20) donde una pelota se mueve
+**arriba, abajo, izquierda o derecha**, con ruido y una pelota quieta como distractor. La tarea es clasificar la
+dirección, algo que solo se puede saber mirando la **secuencia**.
+
+Se resuelve con tres modelos que terminan igual (densa + softmax de 4 clases) y se comparan con una tabla
+(parámetros, exactitud y tiempo), curvas, matrices de confusión y ejemplos:
+
+- **ANN:** aplana el video (4000 entradas).
+- **CNN 2D:** pone los 10 cuadros como 10 canales.
+- **ConvLSTM:** lee los cuadros en orden con una memoria espacial.
+
+Al final se barajan los cuadros para comprobar que el problema es secuencial (los tres caen al azar).
+`Entorno de ejecución → Ejecutar todo`; no necesita subir datos.
